@@ -3,14 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>無料在庫管理スキャナ（入出庫対応）</title>
+    <title>在庫管理スキャナ Pro</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; margin: 0; padding: 20px; background: #f4f4f4; }
         #interactive.viewport { width: 100%; max-width: 500px; height: auto; margin: 0 auto; border: 2px solid #333; position: relative; background: #000; }
         #interactive.viewport canvas, video { width: 100%; height: auto; }
         
-        /* モード切替ボタンのスタイル */
         .mode-container { margin-bottom: 20px; display: flex; justify-content: center; gap: 10px; align-items: center; flex-direction: column; }
         .btn-group { display: flex; gap: 10px; }
         .btn { padding: 15px 30px; font-size: 1.1rem; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; transition: 0.3s; color: white; width: 120px; }
@@ -20,7 +19,7 @@
 
         #result { 
             margin-top: 20px; padding: 15px; background: white; 
-            border-radius: 8px; font-size: 1.2rem; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            border-radius: 8px; font-size: 1.2rem; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.1); min-height: 50px;
         }
         .status-sending { color: #e67e22; }
     </style>
@@ -38,44 +37,56 @@
     </div>
 
     <div id="interactive" class="viewport"></div>
-    
     <div id="result">スキャン待機中...</div>
 
     <script>
-        // 【重要】新しいGASのURLに書き換えてください
+        // 【重要】あなたのGASウェブアプリURLをここに貼り付けてください
         const GAS_URL = "https://script.google.com/macros/s/AKfycbxZlsTkzE5ak2HZyerupbwraXyRjbqQNHgr1jVjb4QUuKvB85cHfPLFGuHiVSMt1goO/exec";
 
         let activeMode = "入庫";
 
-        // モードを切り替える関数
+        // --- ビープ音を鳴らす関数 ---
+        function playBeep() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); 
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                oscillator.start();
+                oscillator.stop(audioCtx.currentTime + 0.1);
+            } catch (e) {
+                console.log("Audio Error:", e);
+            }
+        }
+
+        // モード切替
         function setMode(mode) {
             activeMode = mode;
             const display = document.getElementById('current-mode-display');
             const inBtn = document.getElementById('btn-in');
             const outBtn = document.getElementById('btn-out');
-
             display.innerText = "現在のモード: " + mode;
-
             if (mode === '入庫') {
                 display.style.color = "#2ecc71";
-                inBtn.style.background = "#2ecc71";
-                inBtn.style.boxShadow = "0 4px #27ae60";
-                outBtn.style.background = "#ccc";
-                outBtn.style.boxShadow = "0 4px #999";
+                inBtn.style.background = "#2ecc71"; inBtn.style.boxShadow = "0 4px #27ae60";
+                outBtn.style.background = "#ccc"; outBtn.style.boxShadow = "0 4px #999";
             } else {
                 display.style.color = "#e74c3c";
-                inBtn.style.background = "#ccc";
-                inBtn.style.boxShadow = "0 4px #999";
-                outBtn.style.background = "#e74c3c";
-                outBtn.style.boxShadow = "0 4px #c0392b";
+                inBtn.style.background = "#ccc"; inBtn.style.boxShadow = "0 4px #999";
+                outBtn.style.background = "#e74c3c"; outBtn.style.boxShadow = "0 4px #c0392b";
             }
+            // モード切替時にも軽く音を鳴らして確認しやすくする（任意）
+            playBeep();
         }
 
-        // Quaggaの初期化
+        // Quagga初期化
         Quagga.init({
             inputStream: {
-                name: "Live",
-                type: "LiveStream",
+                name: "Live", type: "LiveStream",
                 target: document.querySelector('#interactive'),
                 constraints: { facingMode: "environment" },
             },
@@ -85,11 +96,13 @@
             Quagga.start();
         });
 
-        // バーコード検知時の処理
+        // バーコード検知
         Quagga.onDetected(function(data) {
             const code = data.codeResult.code;
-            Quagga.stop(); // 二重読み取り防止
+            Quagga.stop(); 
 
+            // スキャン成功時に「ピッ！」
+            playBeep();
             if (navigator.vibrate) navigator.vibrate(200);
 
             if (confirm("【" + activeMode + "】として登録\nコード: " + code)) {
@@ -97,14 +110,13 @@
                 resultDiv.innerText = "送信中...";
                 resultDiv.className = "status-sending";
 
-                // GASへ送信
                 fetch(GAS_URL, {
                     method: "POST",
                     mode: "no-cors",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         code: code,
-                        mode: activeMode, // モード情報を追加
+                        mode: activeMode,
                         date: new Date().toLocaleString("ja-JP")
                     })
                 })
