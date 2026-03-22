@@ -3,43 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>無料バーコードスキャナ</title>
+    <title>無料在庫管理スキャナ</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
     <style>
-        /* カメラ映像のサイズ調整 */
-        #interactive.viewport { width: 100%; height: auto; }
+        body { font-family: sans-serif; text-align: center; margin: 0; padding: 20px; background: #f4f4f4; }
+        #interactive.viewport { width: 100%; max-width: 500px; height: auto; margin: 0 auto; border: 2px solid #333; position: relative; }
         #interactive.viewport canvas, video { width: 100%; height: auto; }
-        #result { font-size: 20px; font-weight: bold; color: red; padding: 20px; }
+        #result { 
+            margin-top: 20px; padding: 15px; background: white; 
+            border-radius: 8px; font-size: 1.2rem; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .status-ready { color: #2ecc71; }
+        .status-sending { color: #e67e22; }
     </style>
 </head>
 <body>
 
-    <h2>バーコードスキャナ</h2>
-    <div id="interactive" class="viewport"></div> <div id="result">読み取り待ち...</div>
+    <h1>在庫スキャナ</h1>
+    
+    <div id="interactive" class="viewport"></div>
+    
+    <div id="result">スキャン待機中...</div>
 
     <script>
+        // 【重要】ここに作成したGASのウェブアプリURLを貼り付けてください
+        const GAS_URL = "ここにあなたのGASのURLを貼り付け";
+
+        // 1. Quagga（カメラ）の初期化
         Quagga.init({
             inputStream: {
                 name: "Live",
                 type: "LiveStream",
-                target: document.querySelector('#interactive'), // 映像を表示する場所
+                target: document.querySelector('#interactive'),
                 constraints: {
-                    facingMode: "environment" // 背面カメラを使用
+                    facingMode: "environment" // 背面カメラ優先
                 },
             },
             decoder: {
-                readers: ["ean_reader"] // 一般的なバーコード（JANコード）を指定
+                readers: ["ean_reader"] // 一般的なバーコード(JAN)を読み取り
             }
         }, function(err) {
-            if (err) { console.log(err); return }
+            if (err) {
+                console.error(err);
+                alert("カメラの起動に失敗しました。HTTPS接続か確認してください。");
+                return;
+            }
             Quagga.start();
         });
 
-        // バーコードを検知した時の処理
+        // 2. バーコードを検知した時の処理
         Quagga.onDetected(function(data) {
             const code = data.codeResult.code;
-            document.getElementById('result').innerText = "読み取り成功: " + code;
-            // ここに「スプレッドシートに送信する処理」を後で追加できます
+
+            // 連続読み取り防止のため一時停止
+            Quagga.stop();
+
+            // バイブレーション（スマホのみ反応）
+            if (navigator.vibrate) navigator.vibrate(200);
+
+            // 送信確認
+            if (confirm("商品コード: " + code + "\nスプレッドシートに登録しますか？")) {
+                
+                const resultDiv = document.getElementById('result');
+                resultDiv.innerText = "送信中...";
+                resultDiv.className = "status-sending";
+
+                // 3. GASへデータを送信
+                fetch(GAS_URL, {
+                    method: "POST",
+                    mode: "no-cors", // ブラウザのセキュリティ制限回避
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        code: code,
+                        date: new Date().toLocaleString("ja-JP")
+                    })
+                })
+                .then(() => {
+                    resultDiv.innerText = "送信完了！: " + code;
+                    resultDiv.className = "status-ready";
+                    // 2秒後にスキャン再開
+                    setTimeout(() => { Quagga.start(); }, 2000);
+                })
+                .catch(err => {
+                    alert("送信エラー: " + err);
+                    Quagga.start();
+                });
+
+            } else {
+                // キャンセルした場合はすぐに再開
+                Quagga.start();
+            }
         });
     </script>
 </body>
