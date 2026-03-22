@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>無料バーコードスキャナ</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <style>
+        /* カメラ映像のサイズ調整 */
+        #interactive.viewport { width: 100%; height: auto; }
+        #interactive.viewport canvas, video { width: 100%; height: auto; }
+        #result { font-size: 20px; font-weight: bold; color: red; padding: 20px; }
+    </style>
+</head>
+<body>
+
+    <h2>バーコードスキャナ</h2>
+    <div id="interactive" class="viewport"></div> <div id="result">読み取り待ち...</div>
+
+    <script>
+        Quagga.init({
+            inputStream: {
+                name: "Live",
+                type: "LiveStream",
+                target: document.querySelector('#interactive'), // 映像を表示する場所
+                constraints: {
+                    facingMode: "environment" // 背面カメラを使用
+                },
+            },
+            decoder: {
+                readers: ["ean_reader"] // 一般的なバーコード（JANコード）を指定
+            }
+        }, function(err) {
+            if (err) { console.log(err); return }
+            Quagga.start();
+        });
+
+        // バーコードを検知した時の処理
+        Quagga.onDetected(function(data) {
+            const code = data.codeResult.code;
+            document.getElementById('result').innerText = "読み取り成功: " + code;
+            // ここに「スプレッドシートに送信する処理」を後で追加できます
+        });
+    </script>
+</body>
+</html>
