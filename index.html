@@ -3,25 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>在庫管理スキャナ Pro</title>
+    <title>在庫管理スキャナ Pro+</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; margin: 0; padding: 20px; background: #f4f4f4; }
         #interactive.viewport { width: 100%; max-width: 500px; height: auto; margin: 0 auto; border: 2px solid #333; position: relative; background: #000; }
         #interactive.viewport canvas, video { width: 100%; height: auto; }
-        
         .mode-container { margin-bottom: 20px; display: flex; justify-content: center; gap: 10px; align-items: center; flex-direction: column; }
         .btn-group { display: flex; gap: 10px; }
-        .btn { padding: 15px 30px; font-size: 1.1rem; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; transition: 0.3s; color: white; width: 120px; }
+        .btn { padding: 15px 30px; font-size: 1.1rem; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; width: 120px; }
         #btn-in { background: #2ecc71; box-shadow: 0 4px #27ae60; }
         #btn-out { background: #ccc; box-shadow: 0 4px #999; }
         #current-mode-display { font-size: 1.2rem; margin-top: 10px; font-weight: bold; color: #2ecc71; }
-
-        #result { 
-            margin-top: 20px; padding: 15px; background: white; 
-            border-radius: 8px; font-size: 1.2rem; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.1); min-height: 50px;
-        }
-        .status-sending { color: #e67e22; }
+        #result { margin-top: 20px; padding: 15px; background: white; border-radius: 8px; font-size: 1.1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.1); min-height: 80px; }
+        .stock-info { color: #2980b9; font-size: 1.3rem; font-weight: bold; margin-top: 5px; }
     </style>
 </head>
 <body>
@@ -37,102 +32,83 @@
     </div>
 
     <div id="interactive" class="viewport"></div>
-    <div id="result">スキャン待機中...</div>
+    
+    <div id="result">
+        <div id="status-text">スキャン待機中...</div>
+        <div id="item-detail" class="stock-info"></div>
+    </div>
 
     <script>
-        // 【重要】あなたのGASウェブアプリURLをここに貼り付けてください
         const GAS_URL = "https://script.google.com/macros/s/AKfycbxZlsTkzE5ak2HZyerupbwraXyRjbqQNHgr1jVjb4QUuKvB85cHfPLFGuHiVSMt1goO/exec";
-
         let activeMode = "入庫";
 
-        // --- ビープ音を鳴らす関数 ---
         function playBeep() {
-            try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const oscillator = audioCtx.createOscillator();
-                const gainNode = audioCtx.createGain();
-                oscillator.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
-                oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); 
-                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-                oscillator.start();
-                oscillator.stop(audioCtx.currentTime + 0.1);
-            } catch (e) {
-                console.log("Audio Error:", e);
-            }
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode); gainNode.connect(audioCtx.destination);
+            oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); 
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.1);
         }
 
-        // モード切替
         function setMode(mode) {
             activeMode = mode;
-            const display = document.getElementById('current-mode-display');
-            const inBtn = document.getElementById('btn-in');
-            const outBtn = document.getElementById('btn-out');
-            display.innerText = "現在のモード: " + mode;
-            if (mode === '入庫') {
-                display.style.color = "#2ecc71";
-                inBtn.style.background = "#2ecc71"; inBtn.style.boxShadow = "0 4px #27ae60";
-                outBtn.style.background = "#ccc"; outBtn.style.boxShadow = "0 4px #999";
-            } else {
-                display.style.color = "#e74c3c";
-                inBtn.style.background = "#ccc"; inBtn.style.boxShadow = "0 4px #999";
-                outBtn.style.background = "#e74c3c"; outBtn.style.boxShadow = "0 4px #c0392b";
-            }
-            // モード切替時にも軽く音を鳴らして確認しやすくする（任意）
+            document.getElementById('current-mode-display').innerText = "現在のモード: " + mode;
+            document.getElementById('btn-in').style.background = (mode === '入庫') ? '#2ecc71' : '#ccc';
+            document.getElementById('btn-out').style.background = (mode === '出庫') ? '#e74c3c' : '#ccc';
             playBeep();
         }
 
-        // Quagga初期化
         Quagga.init({
-            inputStream: {
-                name: "Live", type: "LiveStream",
-                target: document.querySelector('#interactive'),
-                constraints: { facingMode: "environment" },
-            },
+            inputStream: { name: "Live", type: "LiveStream", target: document.querySelector('#interactive'), constraints: { facingMode: "environment" } },
             decoder: { readers: ["ean_reader"] }
-        }, function(err) {
-            if (err) { alert("カメラ起動エラー: " + err); return; }
-            Quagga.start();
-        });
+        }, function(err) { if (err) { alert(err); return; } Quagga.start(); });
 
-        // バーコード検知
-        Quagga.onDetected(function(data) {
+        Quagga.onDetected(async function(data) {
             const code = data.codeResult.code;
-            Quagga.stop(); 
-
-            // スキャン成功時に「ピッ！」
+            Quagga.stop();
             playBeep();
-            if (navigator.vibrate) navigator.vibrate(200);
 
-            if (confirm("【" + activeMode + "】として登録\nコード: " + code)) {
-                const resultDiv = document.getElementById('result');
-                resultDiv.innerText = "送信中...";
-                resultDiv.className = "status-sending";
-
-                fetch(GAS_URL, {
-                    method: "POST",
-                    mode: "no-cors",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        code: code,
-                        mode: activeMode,
-                        date: new Date().toLocaleString("ja-JP")
-                    })
-                })
-                .then(() => {
-                    resultDiv.innerText = "送信完了！(" + activeMode + "): " + code;
-                    resultDiv.className = "";
-                    setTimeout(() => { Quagga.start(); }, 2000);
-                })
-                .catch(err => {
-                    alert("エラー: " + err);
-                    Quagga.start();
-                });
-            } else {
-                Quagga.start();
+            document.getElementById('status-text').innerText = "在庫確認中...";
+            
+            // ★追加：GASから現在の在庫情報を取得する
+            try {
+                const response = await fetch(`${GAS_URL}?code=${code}`);
+                const info = await response.json();
+                document.getElementById('item-detail').innerText = `${info.name} (現在: ${info.stock}個)`;
+                
+                if (confirm(`【${activeMode}】登録しますか？\n${info.name}\n現在の在庫: ${info.stock}個`)) {
+                    sendToSheet(code);
+                } else {
+                    resetScanner();
+                }
+            } catch (e) {
+                if (confirm(`【${activeMode}】登録しますか？\nコード: ${code}\n(在庫取得失敗)`)) {
+                    sendToSheet(code);
+                } else {
+                    resetScanner();
+                }
             }
         });
+
+        function sendToSheet(code) {
+            document.getElementById('status-text').innerText = "送信中...";
+            fetch(GAS_URL, {
+                method: "POST",
+                mode: "no-cors",
+                body: JSON.stringify({ code: code, mode: activeMode, date: new Date().toLocaleString("ja-JP") })
+            }).then(() => {
+                document.getElementById('status-text').innerText = "送信完了！";
+                setTimeout(resetScanner, 2000);
+            });
+        }
+
+        function resetScanner() {
+            document.getElementById('status-text').innerText = "スキャン待機中...";
+            document.getElementById('item-detail').innerText = "";
+            Quagga.start();
+        }
     </script>
 </body>
 </html>
