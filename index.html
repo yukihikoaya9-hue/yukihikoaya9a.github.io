@@ -3,94 +3,121 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>無料在庫管理スキャナ</title>
+    <title>無料在庫管理スキャナ（入出庫対応）</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; margin: 0; padding: 20px; background: #f4f4f4; }
-        #interactive.viewport { width: 100%; max-width: 500px; height: auto; margin: 0 auto; border: 2px solid #333; position: relative; }
+        #interactive.viewport { width: 100%; max-width: 500px; height: auto; margin: 0 auto; border: 2px solid #333; position: relative; background: #000; }
         #interactive.viewport canvas, video { width: 100%; height: auto; }
+        
+        /* モード切替ボタンのスタイル */
+        .mode-container { margin-bottom: 20px; display: flex; justify-content: center; gap: 10px; align-items: center; flex-direction: column; }
+        .btn-group { display: flex; gap: 10px; }
+        .btn { padding: 15px 30px; font-size: 1.1rem; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; transition: 0.3s; color: white; width: 120px; }
+        #btn-in { background: #2ecc71; box-shadow: 0 4px #27ae60; }
+        #btn-out { background: #ccc; box-shadow: 0 4px #999; }
+        #current-mode-display { font-size: 1.2rem; margin-top: 10px; font-weight: bold; color: #2ecc71; }
+
         #result { 
             margin-top: 20px; padding: 15px; background: white; 
             border-radius: 8px; font-size: 1.2rem; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
-        .status-ready { color: #2ecc71; }
         .status-sending { color: #e67e22; }
     </style>
 </head>
 <body>
 
-    <h1>在庫スキャナ</h1>
+    <h1>在庫管理スキャナ</h1>
     
+    <div class="mode-container">
+        <div class="btn-group">
+            <button id="btn-in" class="btn" onclick="setMode('入庫')">入庫</button>
+            <button id="btn-out" class="btn" onclick="setMode('出庫')">出庫</button>
+        </div>
+        <div id="current-mode-display">現在のモード: 入庫</div>
+    </div>
+
     <div id="interactive" class="viewport"></div>
     
     <div id="result">スキャン待機中...</div>
 
     <script>
-        // 【重要】ここに作成したGASのウェブアプリURLを貼り付けてください
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbwYw6qedbKQ4qXiC-9cRR_PAbzov1vButXMXnQ06pEl35GuVWWCGQJPY2Z_Mnf8VvRa/exec";
+        // 【重要】新しいGASのURLに書き換えてください
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbw2k7sqpxxEBaQzsbRXiGJ4cxcJu8-Xu5W7HcPYk4fjiKNEfG1zl3jG5PBpJq-4lcg/exec";
 
-        // 1. Quagga（カメラ）の初期化
+        let activeMode = "入庫";
+
+        // モードを切り替える関数
+        function setMode(mode) {
+            activeMode = mode;
+            const display = document.getElementById('current-mode-display');
+            const inBtn = document.getElementById('btn-in');
+            const outBtn = document.getElementById('btn-out');
+
+            display.innerText = "現在のモード: " + mode;
+
+            if (mode === '入庫') {
+                display.style.color = "#2ecc71";
+                inBtn.style.background = "#2ecc71";
+                inBtn.style.boxShadow = "0 4px #27ae60";
+                outBtn.style.background = "#ccc";
+                outBtn.style.boxShadow = "0 4px #999";
+            } else {
+                display.style.color = "#e74c3c";
+                inBtn.style.background = "#ccc";
+                inBtn.style.boxShadow = "0 4px #999";
+                outBtn.style.background = "#e74c3c";
+                outBtn.style.boxShadow = "0 4px #c0392b";
+            }
+        }
+
+        // Quaggaの初期化
         Quagga.init({
             inputStream: {
                 name: "Live",
                 type: "LiveStream",
                 target: document.querySelector('#interactive'),
-                constraints: {
-                    facingMode: "environment" // 背面カメラ優先
-                },
+                constraints: { facingMode: "environment" },
             },
-            decoder: {
-                readers: ["ean_reader"] // 一般的なバーコード(JAN)を読み取り
-            }
+            decoder: { readers: ["ean_reader"] }
         }, function(err) {
-            if (err) {
-                console.error(err);
-                alert("カメラの起動に失敗しました。HTTPS接続か確認してください。");
-                return;
-            }
+            if (err) { alert("カメラ起動エラー: " + err); return; }
             Quagga.start();
         });
 
-        // 2. バーコードを検知した時の処理
+        // バーコード検知時の処理
         Quagga.onDetected(function(data) {
             const code = data.codeResult.code;
+            Quagga.stop(); // 二重読み取り防止
 
-            // 連続読み取り防止のため一時停止
-            Quagga.stop();
-
-            // バイブレーション（スマホのみ反応）
             if (navigator.vibrate) navigator.vibrate(200);
 
-            // 送信確認
-            if (confirm("商品コード: " + code + "\nスプレッドシートに登録しますか？")) {
-                
+            if (confirm("【" + activeMode + "】として登録\nコード: " + code)) {
                 const resultDiv = document.getElementById('result');
                 resultDiv.innerText = "送信中...";
                 resultDiv.className = "status-sending";
 
-                // 3. GASへデータを送信
+                // GASへ送信
                 fetch(GAS_URL, {
                     method: "POST",
-                    mode: "no-cors", // ブラウザのセキュリティ制限回避
+                    mode: "no-cors",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         code: code,
+                        mode: activeMode, // モード情報を追加
                         date: new Date().toLocaleString("ja-JP")
                     })
                 })
                 .then(() => {
-                    resultDiv.innerText = "送信完了！: " + code;
-                    resultDiv.className = "status-ready";
-                    // 2秒後にスキャン再開
+                    resultDiv.innerText = "送信完了！(" + activeMode + "): " + code;
+                    resultDiv.className = "";
                     setTimeout(() => { Quagga.start(); }, 2000);
                 })
                 .catch(err => {
-                    alert("送信エラー: " + err);
+                    alert("エラー: " + err);
                     Quagga.start();
                 });
-
             } else {
-                // キャンセルした場合はすぐに再開
                 Quagga.start();
             }
         });
