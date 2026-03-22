@@ -62,7 +62,7 @@
 
         Quagga.init({
             inputStream: { name: "Live", type: "LiveStream", target: document.querySelector('#interactive'), constraints: { facingMode: "environment" } },
-            decoder: { readers: ["ean_reader"] }
+            decoder: { readers: ["qrcode_reader"] }
         }, function(err) { if (err) { alert(err); return; } Quagga.start(); });
 
         Quagga.onDetected(async function(data) {
