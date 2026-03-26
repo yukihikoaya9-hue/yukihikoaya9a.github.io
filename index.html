@@ -3,21 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>在庫管理スキャナ Ultimate</title>
+    <title>在庫管理スキャナ Ultimate Pro</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; margin: 0; padding: 20px; background: #f4f4f4; }
-        #interactive.viewport { width: 100%; max-width: 500px; height: auto; margin: 0 auto; border: 2px solid #333; position: relative; background: #000; }
+        #interactive.viewport { width: 100%; max-width: 500px; height: auto; margin: 0 auto; border: 2px solid #333; position: relative; background: #000; overflow: hidden; }
         #interactive.viewport canvas, video { width: 100%; height: auto; }
+        
+        /* 読み取り範囲のガイド枠（オプション） */
+        #interactive.viewport::after {
+            content: ""; position: absolute; top: 20%; left: 10%; width: 80%; height: 60%;
+            border: 2px dashed rgba(255, 255, 255, 0.5); pointer-events: none;
+        }
+
         .mode-container { margin-bottom: 20px; display: flex; justify-content: center; gap: 10px; align-items: center; flex-direction: column; }
         .btn-group { display: flex; gap: 10px; }
-        .btn { padding: 15px 25px; font-size: 1rem; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; width: 110px; }
+        .btn { padding: 15px 25px; font-size: 1rem; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; color: white; width: 110px; transition: 0.2s; }
         #btn-in { background: #2ecc71; box-shadow: 0 4px #27ae60; }
-        #btn-out { background: #e74c3c; box-shadow: 0 4px #c0392b; opacity: 0.5; } /* 初期状態は出庫を薄く */
+        #btn-out { background: #e74c3c; box-shadow: 0 4px #c0392b; opacity: 0.5; }
+
         #sync-panel { margin-top: 10px; padding: 10px; background: #fff; border-radius: 8px; display: inline-block; border: 1px solid #ddd; }
         #result { margin-top: 20px; padding: 15px; background: white; border-radius: 8px; font-size: 1.1rem; box-shadow: 0 2px 5px rgba(0,0,0,0.1); min-height: 80px; }
         .stock-info { color: #2980b9; font-size: 1.2rem; font-weight: bold; margin-top: 5px; }
-        .offline-badge { background: #7f8c8d; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; vertical-align: middle; }
+        .status-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; color: white; margin-left: 5px; }
     </style>
 </head>
 <body>
@@ -38,20 +46,22 @@
     <div id="interactive" class="viewport"></div>
     
     <div id="result">
-        <div id="status-text">スキャン待機中... <span id="online-status" class="offline-badge">確認中</span></div>
+        <div id="status-text">スキャン待機中... <span id="online-status" class="status-badge">確認中</span></div>
         <div id="item-detail" class="stock-info"></div>
     </div>
 
     <script>
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbzoLX7OP7gNBCEEAU2nDKRfFyPtaDVQHYWqB3xwMolMmcXBsL1yZSqaWBOeZFX7eYk/exec";
+        // 【重要】あなたの最新のGASウェブアプリURLをここに貼り付けてください
+        const GAS_URL = "ここにあなたのGASのURL";
+
         let activeMode = "入庫";
 
-        // 起動時に待ち件数を更新
         window.onload = () => {
             updateQueueDisplay();
             checkOnlineStatus();
         };
 
+        // オンライン状態の確認
         function checkOnlineStatus() {
             const status = document.getElementById('online-status');
             if (navigator.onLine) {
@@ -63,16 +73,20 @@
             }
         }
 
+        // ビープ音再生
         function playBeep() {
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.connect(gainNode); gainNode.connect(audioCtx.destination);
-            oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); 
-            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
-            oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.1);
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.connect(gainNode); gainNode.connect(audioCtx.destination);
+                oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); 
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                oscillator.start(); oscillator.stop(audioCtx.currentTime + 0.1);
+            } catch(e) { console.log(e); }
         }
 
+        // モード切替
         function setMode(mode) {
             activeMode = mode;
             document.getElementById('btn-in').style.opacity = (mode === '入庫') ? '1' : '0.5';
@@ -80,11 +94,30 @@
             playBeep();
         }
 
+        // --- 最新の高画質・ピント調整版 Quagga設定 ---
         Quagga.init({
-            inputStream: { name: "Live", type: "LiveStream", target: document.querySelector('#interactive'), constraints: { facingMode: "environment" } },
-            decoder: { readers: ["qrcode_reader", "ean_reader"] } // QRもバーコードも両方いける設定
-        }, function(err) { if (err) { alert(err); return; } Quagga.start(); });
+            inputStream: {
+                name: "Live",
+                type: "LiveStream",
+                target: document.querySelector('#interactive'),
+                constraints: {
+                    facingMode: "environment",
+                    width: { min: 640, ideal: 1280, max: 1920 },
+                    height: { min: 480, ideal: 720, max: 1080 },
+                    advanced: [{ focusMode: "continuous" }] // オートフォーカス継続
+                }
+            },
+            decoder: { 
+                readers: ["qrcode_reader", "ean_reader"], // QRとバーコード両方
+                multiple: false 
+            },
+            locator: { halfSample: true, patchSize: "medium" }
+        }, function(err) {
+            if (err) { alert("カメラ起動エラー: " + err); return; }
+            Quagga.start();
+        });
 
+        // スキャン検知時
         Quagga.onDetected(async function(data) {
             const code = data.codeResult.code;
             Quagga.stop();
@@ -97,13 +130,16 @@
             if (navigator.onLine) {
                 statusText.innerText = "在庫確認中...";
                 try {
+                    // GASに在庫を問い合わせ
                     const response = await fetch(`${GAS_URL}?code=${code}`);
                     const info = await response.json();
-                    itemDetail.innerText = `${info.name} (現在: ${info.stock}個)`;
-                    if (confirm(`【${activeMode}】登録しますか？\n${info.name}\n現在在庫: ${info.stock}個`)) {
-                        processData({ code: code, mode: activeMode, date: new Date().toLocaleString("ja-JP") });
+                    itemDetail.innerText = `${info.name} (在庫: ${info.stock})`;
+                    
+                    if (confirm(`【${activeMode}】登録しますか？\n${info.name}\n現在数: ${info.stock}`)) {
+                        await processData({ code: code, mode: activeMode, date: new Date().toLocaleString("ja-JP") });
                     } else { resetScanner(); }
                 } catch (e) {
+                    // 通信エラー時はオフライン保存へ
                     saveOffline({ code: code, mode: activeMode, date: new Date().toLocaleString("ja-JP") });
                 }
             } else {
@@ -111,38 +147,45 @@
             }
         });
 
+        // 送信処理（オンライン時）
+        async function processData(data) {
+            document.getElementById('status-text').innerText = "送信中...";
+            try {
+                await fetch(GAS_URL, {
+                    method: "POST",
+                    mode: "no-cors",
+                    body: JSON.stringify(data)
+                });
+                document.getElementById('status-text').innerText = "送信完了！";
+                setTimeout(resetScanner, 1500);
+            } catch(e) {
+                saveOffline(data);
+            }
+        }
+
+        // 一時保存（オフライン時）
         function saveOffline(data) {
             let queue = JSON.parse(localStorage.getItem('scanQueue') || "[]");
             queue.push(data);
             localStorage.setItem('scanQueue', JSON.stringify(queue));
             updateQueueDisplay();
-            alert("オフラインのため端末に保存しました（送信待ちに追加）");
+            alert("端末に保存しました（現在オフライン）");
             resetScanner();
         }
 
-        async function processData(data) {
-            document.getElementById('status-text').innerText = "送信中...";
-            await fetch(GAS_URL, {
-                method: "POST",
-                mode: "no-cors",
-                body: JSON.stringify(data)
-            });
-            document.getElementById('status-text').innerText = "送信完了！";
-            setTimeout(resetScanner, 1500);
-        }
-
+        // 同期実行（送信待ちデータを一括送信）
         async function syncData() {
-            if (!navigator.onLine) { alert("インターネットに接続してください"); return; }
+            if (!navigator.onLine) { alert("ネットに接続してください"); return; }
             let queue = JSON.parse(localStorage.getItem('scanQueue') || "[]");
-            if (queue.length === 0) { alert("送信待ちデータはありません"); return; }
+            if (queue.length === 0) { alert("送信待ちはありません"); return; }
 
-            document.getElementById('status-text').innerText = "同期実行中...";
+            document.getElementById('status-text').innerText = "同期中...";
             for (let data of queue) {
                 await fetch(GAS_URL, { method: "POST", mode: "no-cors", body: JSON.stringify(data) });
             }
             localStorage.removeItem('scanQueue');
             updateQueueDisplay();
-            alert("すべてのデータを同期しました！");
+            alert("同期が完了しました！");
             resetScanner();
         }
 
